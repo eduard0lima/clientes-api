@@ -1,0 +1,697 @@
+{
+  "info": {
+    "_postman_id": "a03c1e50-451c-44fb-b41d-f386e01f0f34",
+    "name": "Clientes API",
+    "description": "Coleção completa para testar autenticação, autorização, CRUD de clientes, consulta de score e integração com RabbitMQ.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 - Autenticação",
+      "description": "Obtém os tokens JWT e os salva nas variáveis da coleção.",
+      "item": [
+        {
+          "name": "Obter token ADMIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "client_id", "value": "clientes-api", "type": "text" },
+                { "key": "username", "value": "{{adminUsername}}", "type": "text" },
+                { "key": "password", "value": "{{adminPassword}}", "type": "text" },
+                { "key": "grant_type", "value": "password", "type": "text" }
+              ]
+            },
+            "url": "{{keycloakUrl}}/realms/clientes/protocol/openid-connect/token",
+            "description": "Autentica o administrador local. O script salva o access token em adminToken."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Token ADMIN obtido', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const resposta = pm.response.json();",
+                  "    pm.expect(resposta.access_token).to.be.a('string').and.not.empty;",
+                  "    pm.collectionVariables.set('adminToken', resposta.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obter token USER",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "client_id", "value": "clientes-api", "type": "text" },
+                { "key": "username", "value": "{{userUsername}}", "type": "text" },
+                { "key": "password", "value": "{{userPassword}}", "type": "text" },
+                { "key": "grant_type", "value": "password", "type": "text" }
+              ]
+            },
+            "url": "{{keycloakUrl}}/realms/clientes/protocol/openid-connect/token",
+            "description": "Autentica o usuário de consulta. O script salva o access token em userToken."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Token USER obtido', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const resposta = pm.response.json();",
+                  "    pm.expect(resposta.access_token).to.be.a('string').and.not.empty;",
+                  "    pm.collectionVariables.set('userToken', resposta.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Infraestrutura",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health",
+            "description": "Endpoint público para verificar se a aplicação está disponível."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Aplicação disponível', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql('UP');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Clientes",
+      "description": "Fluxo principal de cadastro e consulta.",
+      "item": [
+        {
+          "name": "Cadastrar cliente",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function calcularDigito(numeros, pesoInicial) {",
+                  "    const soma = numeros.reduce((total, numero, indice) => total + numero * (pesoInicial - indice), 0);",
+                  "    const resto = soma % 11;",
+                  "    return resto < 2 ? 0 : 11 - resto;",
+                  "}",
+                  "let numeros = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));",
+                  "if (numeros.every(numero => numero === numeros[0])) numeros[8] = (numeros[8] + 1) % 10;",
+                  "numeros.push(calcularDigito(numeros, 10));",
+                  "numeros.push(calcularDigito(numeros, 11));",
+                  "pm.collectionVariables.set('cpfTeste', numeros.join(''));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cliente criado', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    const cliente = pm.response.json();",
+                  "    pm.expect(cliente.id).to.be.a('number');",
+                  "    pm.collectionVariables.set('customerId', cliente.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Maria da Silva\",\n  \"cpf\": \"{{cpfTeste}}\",\n  \"email\": \"maria.{{$timestamp}}@email.com\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/customers",
+            "description": "Cria um cliente com CPF válido gerado automaticamente e salva seu id em customerId."
+          }
+        },
+        {
+          "name": "Buscar cliente por id",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/customers/{{customerId}}",
+            "description": "Consulta um cliente usando o perfil USER."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cliente encontrado', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('customerId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar clientes",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers?page=0&size=20&sort=nome,asc",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers"],
+              "query": [
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" },
+                { "key": "sort", "value": "nome,asc" }
+              ]
+            },
+            "description": "Lista clientes de forma paginada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Lista retornada', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().content).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar clientes por status",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers?status=ACTIVE",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers"],
+              "query": [
+                { "key": "status", "value": "ACTIVE" }
+              ]
+            },
+            "description": "Filtra a listagem por ACTIVE ou INACTIVE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Filtro por status executado', function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar clientes por nome",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/search?name=maria",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "search"],
+              "query": [
+                { "key": "name", "value": "maria" }
+              ]
+            },
+            "description": "Busca até 20 clientes cujo nome contém o texto informado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Busca por nome executada', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json()).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atualizar cliente",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Maria da Silva Atualizada\",\n  \"email\": \"maria.atualizada@email.com\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/customers/{{customerId}}",
+            "description": "Atualiza nome, e-mail e status usando o perfil ADMIN."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cliente atualizado', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().name).to.eql('Maria da Silva Atualizada');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar score",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/customers/{{customerId}}/score",
+            "description": "Consulta o serviço externo de score usando o CPF do cliente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Score retornado', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().score).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - RabbitMQ",
+      "description": "Exemplos usando a API HTTP de administração do RabbitMQ.",
+      "item": [
+        {
+          "name": "Consultar fila CUSTOMER_CREATED",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUsername}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{rabbitmqUrl}}/api/queues/%2F/clientes.criado",
+            "description": "Exibe a fila que recebe os eventos CUSTOMER_CREATED publicados pela outbox."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Fila de criação disponível', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().name).to.eql('clientes.criado');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicar alteração de status",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{rabbitmqUsername}}", "type": "string" },
+                { "key": "password", "value": "{{rabbitmqPassword}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"properties\": {\n    \"content_type\": \"application/json\"\n  },\n  \"routing_key\": \"customer.status.change\",\n  \"payload\": \"{\\\"eventId\\\":\\\"{{$guid}}\\\",\\\"eventType\\\":\\\"CUSTOMER_STATUS_CHANGE\\\",\\\"customerId\\\":{{customerId}},\\\"status\\\":\\\"INACTIVE\\\"}\",\n  \"payload_encoding\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{rabbitmqUrl}}/api/exchanges/%2F/clientes.eventos/publish",
+            "description": "Publica CUSTOMER_STATUS_CHANGE. Depois consulte o cliente novamente para verificar o status INACTIVE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Mensagem encaminhada para a fila', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().routed).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verificar status após mensagem",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(function () {}, 1000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status alterado pelo consumidor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql('INACTIVE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/customers/{{customerId}}",
+            "description": "Confirma que o consumidor alterou o status para INACTIVE."
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Cenários de erro",
+      "item": [
+        {
+          "name": "Consulta sem token - 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/customers/{{customerId}}",
+            "description": "Demonstra a proteção de uma rota autenticada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Acesso não autenticado recusado', function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "USER tentando cadastrar - 403",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Operação não autorizada\",\n  \"cpf\": \"{{cpfTeste}}\",\n  \"email\": \"user@email.com\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/customers",
+            "description": "USER possui somente permissão de consulta."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Escrita por USER recusada', function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cadastrar CPF duplicado - 409",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cliente duplicado\",\n  \"cpf\": \"{{cpfTeste}}\",\n  \"email\": \"duplicado@email.com\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/customers",
+            "description": "Execute após Cadastrar cliente para reutilizar o CPF gerado."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CPF duplicado tratado', function () { pm.response.to.have.status(409); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cadastrar dados inválidos - 400",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"cpf\": \"123\",\n  \"email\": \"email-invalido\",\n  \"status\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/customers",
+            "description": "Demonstra a validação dos campos de entrada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Dados inválidos tratados', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errors).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cliente inexistente - 404",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{userToken}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/customers/999999999",
+            "description": "Consulta um id que não existe."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cliente inexistente tratado', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Limpeza",
+      "description": "Execute por último para remover o cliente criado durante os testes.",
+      "item": [
+        {
+          "name": "Excluir cliente",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/customers/{{customerId}}",
+            "description": "Exclui o cliente criado no início da execução."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cliente excluído', function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "keycloakUrl", "value": "http://localhost:8081", "type": "string" },
+    { "key": "rabbitmqUrl", "value": "http://localhost:15672", "type": "string" },
+    { "key": "adminUsername", "value": "administrador", "type": "string" },
+    { "key": "adminPassword", "value": "admin123", "type": "string" },
+    { "key": "userUsername", "value": "usuario", "type": "string" },
+    { "key": "userPassword", "value": "usuario123", "type": "string" },
+    { "key": "rabbitmqUsername", "value": "clientes", "type": "string" },
+    { "key": "rabbitmqPassword", "value": "clientes", "type": "string" },
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "userToken", "value": "", "type": "string" },
+    { "key": "customerId", "value": "", "type": "string" },
+    { "key": "cpfTeste", "value": "", "type": "string" }
+  ]
+}

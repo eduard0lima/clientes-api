@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/scores/11144477735"
+  },
+  "priority": 1,
+  "response": {
+    "status": 200,
+    "fixedDelayMilliseconds": 5000,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "cpf": "11144477735",
+      "score": 420,
+      "classification": "MEDIUM_RISK"
+    }
+  }
+}

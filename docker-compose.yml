@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: clientes
+      POSTGRES_USER: clientes
+      POSTGRES_PASSWORD: clientes
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clientes -d clientes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: clientes
+      RABBITMQ_DEFAULT_PASS: clientes
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./docker/keycloak/clientes-realm.json:/opt/keycloak/data/import/clientes-realm.json:ro
+
+  score:
+    image: wiremock/wiremock:3.13.1
+    command: --global-response-templating --verbose
+    ports:
+      - "${SCORE_PORT:-8082}:8080"
+    volumes:
+      - ./docker/wiremock:/home/wiremock:ro
+
+  clientes-api:
+    build: .
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/clientes
+      DB_USER: clientes
+      DB_PASSWORD: clientes
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: clientes
+      RABBITMQ_PASSWORD: clientes
+      SCORE_URL: http://score:8080
+      JWT_ISSUER_URI: http://localhost:8081/realms/clientes
+      JWT_JWK_SET_URI: http://keycloak:8080/realms/clientes/protocol/openid-connect/certs
+      APP_TIME_ZONE: America/Sao_Paulo
+      TZ: America/Sao_Paulo
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      score:
+        condition: service_started
+
+volumes:
+  postgres_data:
